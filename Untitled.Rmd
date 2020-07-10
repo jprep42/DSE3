@@ -1,0 +1,221 @@
+---
+title: "DataScienceExam3"
+author: "JP Reppeto"
+date: "7/9/2020"
+output: word_document
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**1:**
+```{r Clear the environment}
+rm(list=ls(all=TRUE))
+```
+
+**2:**
+```{r}
+#load tidycensus
+library(tidycensus)
+
+#load my API Key
+census_api_key("2a948c32a69d16b8ec8ecda67d3076cc9eb6126c")
+
+#load the variables
+v10 <- load_variables(year = 2010, dataset = "acs5")
+#Used this to locate GINI data by searching "GINI" in view panel (GINI code: B19083_001)
+
+#import state level data for both years
+gini10 <- get_acs(geography = "state",
+                 variables = c(poverty = c("B19083_001")),
+                 year = 2010)
+
+gini15 <- get_acs(geography = "state",
+                  variables = c(poverty = c("B19083_001")),
+                  year = 2015)
+
+#add year column
+gini10$year <- 2010
+gini15$year <- 2015
+
+#combine
+#load package to deal with these big boys
+library(bit64)
+
+#put our data into one big boy panel
+library(tidyverse)
+inequality_panel = bind_rows(gini10, gini15)
+
+#rename variables
+library(data.table)
+setnames(inequality_panel, "NAME","state" )
+setnames(inequality_panel, "estimate","gini" )
+
+#order
+inequality_panel = inequality_panel[order(inequality_panel$state, 
+                                          inequality_panel$year), ]
+
+head(inequality_panel)
+```
+
+**3-5:**
+```{r}
+#make it wide by GINI
+wide_by_gini <-
+  inequality_panel %>%
+  pivot_wider(id_cols = c("gini", "year"),
+              names_from = c("state", "GEOID"),
+              values_from = "gini")
+
+#make it wide by GINI (2)
+wide_by_gini <-
+  inequality_panel %>%
+  pivot_wider(id_cols = c("gini", "year"),
+              names_from = "state",
+              values_from = "gini")
+
+head(wide_by_gini)
+
+
+#make it long again
+long_inequality <-
+  wide_by_gini %>% 
+  pivot_longer(cols =starts_with("year"),
+               names_to = "year",
+               values_to = "gini",
+               values_drop_na = FALSE) %>%
+  filter(!(current_amount==0))
+```
+I couldn't get my long_inequality function to work but I would compare the two
+with the structure command to see if they have the same number of obersavtions.
+
+**8-9:**
+
+```{R}
+
+#WDI import
+library(WDI)
+gdp_current = WDI(country = "all", 
+                    indicator =c("NY.GDP.MKTP.CD"),
+                    start = 2006, end = 2007,
+                    extra = FALSE, cache = NULL)
+
+#deflator import
+deflator_data = WDI(country = "all", 
+                    indicator =c("NY.GDP.DEFL.ZS"),
+                    start = 2006, end = 2007,
+                    extra = FALSE, cache = NULL)
+
+#rename the deflator variable
+library(data.table)
+setnames(deflator_data, "NY.GDP.DEFL.ZS", "deflator")
+view(deflator_data)
+
+#subset to a USD deflator
+usd_deflator = subset(deflator_data, country == "United States")
+
+#merge the two
+deflated_data = left_join(gdp_current,
+                          usd_deflator,
+                          by= "year")
+
+#deflation
+deflated_data$deflated_amount = deflated_data$current_amount/
+  (deflated_data$deflator/100)
+```
+code wouldn't work so can't produce a head :/
+
+**10:**
+Shiny apps are composed of UI, server, and the front end app itself.
+
+UIs are made of inputs and outputs. Servers are composed of objects that store
+your directions and a render function. The front end app is filled by anything
+programmed in the UI and processed by the server. 
+
+**11-14:**
+```{r}
+#pulling Mike's PDF
+#loading packages
+library(pdftools)
+library(tidyr)
+library(tidytext)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+
+#pulling up pdf 
+mytext=pdf_text(pdf = "https://pdf.usaid.gov/pdf_docs/PA00TNMG.pdf") 
+
+#converting pdf object to df
+armeniatext=as.data.frame(mytext)
+armeniatext$page=c(1:65)
+#renmaing column
+colnames(armeniatext)[which(names(armeniatext) == "mytext")] <- "text"
+
+#tokenize/remove stop words
+armeniatext=armeniatext %>%
+  unnest_tokens(word, text)
+
+armeniatext=armeniatext %>%
+anti_join(stop_words)
+
+#frequency analysis for top 6
+arfreq <- armeniatext %>%
+  count(word, sort = TRUE)
+
+head(arfreq)
+```
+
+**15-17:**
+```{r}
+#load Billboard 100
+#packages
+library(rvest)
+library(dplyr)
+library(ggplot2)
+
+#read in the data
+hot100 <- "https://www.billboard.com/charts/hot-100"
+hot100exam <- read_html(hot100)
+
+#using rvest to find the nodes
+#declare the full structure of the webpage to R
+body_nodes <- hot100exam %>%
+  html_node("body") %>%
+  html_children()
+
+body_nodes
+
+#scraping Rank, Artist, Title, Last Week
+rank <- hot100exam %>%
+  rvest::html_nodes('body') %>%
+  xml2::xml_find_all("//span[contains(@class,
+'chart-element__rank__number')]") %>%
+  rvest::html_text()
+
+artist <- hot100exam %>%
+  rvest::html_nodes('body') %>%
+  xml2::xml_find_all("//span[contains(@class,
+'chart-element__information__artist')]") %>%
+  rvest::html_text()
+
+title <- hot100exam %>%
+  rvest::html_nodes('body') %>%
+  xml2::xml_find_all("//span[contains(@class,
+'chart-element__information__song')]") %>%
+  rvest::html_text()
+
+lastweek <- hot100exam %>%
+  rvest::html_nodes('body') %>%
+  xml2::xml_find_all("//span[contains(@class,
+  'chart-element__information__delta__text text--last')]") %>%
+  rvest::html_text()
+
+#combine into a df  
+chart_df <- data.frame(rank, artist, title, lastweek)
+
+#view as a table
+knitr::kable(
+  chart_df %>% head(10))
+```
